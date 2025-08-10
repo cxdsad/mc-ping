@@ -21,6 +21,7 @@ fn is_domain(addr: &str) -> bool {
 /// # use anyhow::Result;
 /// # #[tokio::main]
 /// # async fn main() -> Result<()> {
+/// use mc_ping::connection::Connection;
 /// let addr = ("play.example.com".to_string(), 25565);
 /// let mut conn = Connection::connect(addr).await?;
 /// let status = conn.ping().await?;
@@ -51,6 +52,7 @@ impl Connection {
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main() -> Result<()> {
+    /// use mc_ping::connection::Connection;
     /// let addr = ("localhost".to_string(), 25565);
     /// let conn = Connection::connect(addr).await?;
     /// # Ok(())
@@ -99,6 +101,7 @@ impl Connection {
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main() -> Result<()> {
+    /// use mc_ping::connection::Connection;
     /// let addr = ("example.com".to_string(), 25565);
     /// match Connection::connect_timeout(addr, Duration::from_secs(5)).await {
     ///     Ok(conn) => println!("Connected!"),
@@ -130,6 +133,7 @@ impl Connection {
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main() -> Result<()> {
+    /// use mc_ping::connection::Connection;
     /// let addr = ("127.0.0.1".to_string(), 25565);
     /// let mut conn = Connection::connect(addr).await?;
     /// conn.send_handshake().await?;
@@ -180,6 +184,7 @@ impl Connection {
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main() -> Result<()> {
+    /// use mc_ping::connection::Connection;
     /// let addr = ("localhost".to_string(), 25565);
     /// let mut conn = Connection::connect(addr).await?;
     /// conn.send_handshake().await?;
@@ -208,6 +213,7 @@ impl Connection {
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main() -> Result<()> {
+    /// use mc_ping::connection::Connection;
     /// let addr = ("play.example.com".to_string(), 25565);
     /// let mut conn = Connection::connect(addr).await?;
     /// let status = conn.ping().await?;

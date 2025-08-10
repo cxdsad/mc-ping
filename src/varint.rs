@@ -70,29 +70,6 @@ impl Default for $store_struct {
     }
 }
 
-/// The Read trait for this VarInt or VarLong struct.
-///
-/// This trait is implemented for all `io::Read`'s.
-///
-/// # Examples
-///
-/// `Cursor`s implement `io::Read`, thus implement `VarIntRead` and `VarLongRead`:
-///
-/// ```
-/// extern crate mc_varint;
-///
-/// use mc_varint::{VarInt, VarIntRead};
-/// use std::io::Cursor;
-///
-/// fn main() {
-///     // firstly we create a Cursor
-///     let mut cur = Cursor::new(vec![0xff, 0xff, 0xff, 0xff, 0x07]);
-///     // secondly we write the VarInt to the Cursor
-///     let var_int = cur.read_var_int().unwrap();
-///     // the value of var_int is 2147483647
-///     assert_eq!(var_int, VarInt::from(2147483647));
-/// }
-/// ```
 pub trait $read_trait {
     /// Reads a VarInt or Varlong from `self`.
     ///
@@ -134,21 +111,6 @@ impl<R> $read_trait for R where R: io::Read {
 ///
 /// `Cursor`s implement `io::Write`, thus implement `VarIntWrite` and `VarLongWrite`:
 ///
-/// ```
-/// extern crate mc_varint;
-///
-/// use mc_varint::{VarInt, VarIntWrite};
-/// use std::io::Cursor;
-///
-/// fn main() {
-///     // firstly we create a Cursor and a VarInt
-///     let mut cur = Cursor::new(Vec::with_capacity(5));
-///     let var_int = VarInt::from(2147483647);
-///     // secondly we write to it
-///     cur.write_var_int(var_int).unwrap();
-///     // now the var_int is written to cur.
-///     assert_eq!(cur.into_inner(), vec![0xff, 0xff, 0xff, 0xff, 0x07]);
-/// }
 /// ```
 pub trait $write_trait {
     /// Writes a VarInt or Varlong to `self`.
