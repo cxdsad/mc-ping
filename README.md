@@ -15,6 +15,7 @@ It supports:
 - Async/await based using [Tokio](https://tokio.rs/).
 - Optional DNS resolving feature (enabled via `resolve` feature flag).
 - Parses JSON server status into typed Rust structs.
+- Socks5 proxy support.
 - Timeout support on connections.
 
 ---
