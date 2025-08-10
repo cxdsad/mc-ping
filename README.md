@@ -23,7 +23,7 @@ It supports:
 
 ```rust
 use tokio::time::Duration;
-use mc-ping::Connection;
+use mc_ping::Connection;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
