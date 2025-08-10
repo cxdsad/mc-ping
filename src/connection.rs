@@ -163,7 +163,7 @@ impl Connection {
     ///
     /// Internal helper function, generally not called directly.
     async fn __read_status_packet(&mut self) -> Result<ServerQueryResponse> {
-        let mut buf = [0u8; 4096];
+        let mut buf = [0u8; 10_000];
         self.stream.read(&mut buf).await?;
         let status_packet = ServerQueryResponse::from(&buf[..]);
         Ok(status_packet)
