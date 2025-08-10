@@ -4,8 +4,10 @@ version = "0.0.1"
 edition = "2024"
 authors = ["cxdsad"]
 keywords = ["minecraft", "pinger", "mc", "non-blocking", "tcp"]
-categories = ["asynchronous", "network-programming"]
+categories = ["asynchronous", "network-programming", "game-development"]
 description = "Simple Java Minecraft Server Pinger"
+repository = "https://github.com/cxdsad/mc-ping"
+readme = "README.md"
 
 [features]
 resolve = []
