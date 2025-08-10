@@ -87,10 +87,10 @@ impl Connection<TcpStream> {
     /// # }
     /// ```
     pub async fn connect(&mut self) -> Result<Self> {
+        let _timeout = self.timeout.unwrap_or(8000);
+
         #[cfg(not(feature = "resolve"))]
         {
-            let _timeout = self.timeout.unwrap_or(8000);
-
             let addr = self.addr.clone();
             if is_domain(&addr.0) {
                 return Err(anyhow!(r#"Enable feature "resolve" to enable domain resolving"#));
@@ -117,7 +117,6 @@ impl Connection<TcpStream> {
                             (addr.0.as_str(), addr.1)
                         )
                     ).await??;
-                    // Convert Socks5Stream into underlying TcpStream
                     Ok(Self {
                         stream: Some(stream.into_inner()),
                         is_initialized: true,
@@ -128,23 +127,43 @@ impl Connection<TcpStream> {
                 }
             }
         }
+
         #[cfg(feature = "resolve")]
         {
-            let _timeout = self.timeout.unwrap_or(8000);
-            let host_port = format!("{}:{}", self.addr.0.clone(), self.addr.1);
-            let mut addrs = lookup_host(host_port.clone()).await?;
-            if let Some(sock_addr) = addrs.next() {
-                // Connect to resolved socket address with timeout
-                let stream = timeout(Duration::from_millis(_timeout), TcpStream::connect(sock_addr)).await??;
-                Ok(Self {
-                    stream: Some(stream),
-                    is_initialized: true,
-                    timeout: self.timeout.clone(),
-                    proxy_addr: self.proxy_addr.clone(),
-                    addr: self.addr.clone(),
-                })
-            } else {
-                Err(anyhow!("Could not resolve address: {}", host_port))
+            match &self.proxy_addr {
+                Some(proxy_addr) => {
+                    let stream = timeout(
+                        Duration::from_millis(_timeout),
+                        Socks5Stream::connect(
+                            (proxy_addr.0.as_str(), proxy_addr.1),
+                            (self.addr.0.as_str(), self.addr.1),
+                        )
+                    ).await??;
+
+                    Ok(Self {
+                        stream: Some(stream.into_inner()),
+                        is_initialized: true,
+                        timeout: self.timeout.clone(),
+                        proxy_addr: self.proxy_addr.clone(),
+                        addr: self.addr.clone(),
+                    })
+                }
+                None => {
+                    let host_port = format!("{}:{}", self.addr.0, self.addr.1);
+                    let mut addrs = lookup_host(host_port).await?;
+                    if let Some(sock_addr) = addrs.next() {
+                        let stream = timeout(Duration::from_millis(_timeout), TcpStream::connect(sock_addr)).await??;
+                        Ok(Self {
+                            stream: Some(stream),
+                            is_initialized: true,
+                            timeout: self.timeout.clone(),
+                            proxy_addr: None,
+                            addr: self.addr.clone(),
+                        })
+                    } else {
+                        Err(anyhow!("Could not resolve address: {}", self.addr.0))
+                    }
+                }
             }
         }
     }
