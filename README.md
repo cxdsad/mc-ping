@@ -23,14 +23,15 @@ It supports:
 
 ```rust
 use tokio::time::Duration;
-use mc_ping::Connection;
+use mc_ping::connection::Connection;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr = ("example.com".to_string(), 25565);
 
     // Connect to the server with a timeout of 5 seconds
-    let mut connection = Connection::connect_timeout(addr, Duration::from_secs(5)).await?;
+    let mut connection = Connection::new(addr)
+    connection = connection.timeout(5000)?.connect().await?
 
     // Perform handshake and status query
     let status = connection.ping().await?;

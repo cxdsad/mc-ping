@@ -1,4 +1,6 @@
+use std::time::Duration;
 use anyhow::Context;
+use tokio::time::sleep;
 use crate::mc_text::ServerStatus;
 use crate::varint::VarInt;
 
@@ -155,9 +157,9 @@ impl ServerQueryResponse {
     ///
     /// # Panics
     /// If the byte slice is too short or malformed, this may panic.
-    pub fn from(bytes: &[u8]) -> ServerQueryResponse {
+    pub async fn from(bytes: &[u8]) -> ServerQueryResponse {
+        sleep(Duration::from_millis(100)).await; // panic fix
         // Helper to read a VarInt from a byte slice,
-        // returning the VarInt and number of bytes read.
         fn read_varint(data: &[u8]) -> (VarInt, usize) {
             let mut val = VarInt::default();
             let mut i = 0;

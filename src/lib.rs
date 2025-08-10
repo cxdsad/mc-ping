@@ -1,4 +1,5 @@
 #![crate_type = "rlib"]
+
 #[doc = include_str!("../README.md")]
 
 pub mod connection;
@@ -7,9 +8,11 @@ mod varint;
 pub mod mc_text;
 
 #[tokio::test]
-async fn test_localhost() {
+async fn test_localhost() -> anyhow::Result<()> {
     use crate::connection::Connection;
-    let mut conn = Connection::connect(("127.0.0.1".to_string(), 25565)).await.unwrap();
+    let mut conn = Connection::new(("127.0.0.1".to_string(), 25565));
+    conn = conn.timeout(7000)?.connect().await?;
     let status = conn.ping().await.unwrap();
     println!("{:?}", status);
+    Ok(())
 }

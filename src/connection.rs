@@ -6,187 +6,299 @@ use crate::mc_text::ServerStatus;
 use crate::packets::{ClientHandshake, ServerQueryResponse, StatusQuery};
 use anyhow::{anyhow, Result};
 use tokio::net::lookup_host;
-
+use tokio_socks::tcp::Socks5Stream;
 
 fn is_domain(addr: &str) -> bool {
     addr.parse::<std::net::IpAddr>().is_err()
 }
 
 /// Represents a TCP connection to a Minecraft server.
+/// Supports optional SOCKS5 proxy connections.
 ///
-/// # Examples
+/// # Type Parameters
 ///
-/// ```no_run
-/// use std::time::Duration;
-/// # use anyhow::Result;
-/// # #[tokio::main]
-/// # async fn main() -> Result<()> {
-/// use mc_ping::connection::Connection;
-/// let addr = ("play.example.com".to_string(), 25565);
-/// let mut conn = Connection::connect(addr).await?;
-/// let status = conn.ping().await?;
-/// println!("Server status: {:?}", status);
-/// # Ok(())
-/// # }
-/// ```
-pub struct Connection {
-    /// Underlying TCP stream.
-    pub stream: TcpStream,
-
-    /// Server address as (IP/domain, port).
+/// * `T`: Underlying TCP stream type, usually `TcpStream`.
+///
+/// # Fields
+///
+/// * `stream`: Optionally holds the active TCP stream.
+/// * `timeout`: Optional timeout duration in milliseconds for connection and I/O.
+/// * `proxy_addr`: Optional SOCKS5 proxy address as `(host, port)`.
+/// * `addr`: Target Minecraft server address `(host, port)`.
+pub struct Connection<T> {
+    pub is_initialized: bool,
+    pub stream: Option<T>,
+    pub timeout: Option<u64>,
+    pub proxy_addr: Option<(String, u16)>,
     pub addr: (String, u16),
 }
 
-impl Connection {
-    /// Connects to a Minecraft server at the specified address.
+impl Connection<TcpStream> {
+    /// Creates a new `Connection` instance with the target server address.
     ///
-    /// If the `resolve` feature is enabled, attempts to resolve domain names to IP addresses before connecting.
+    /// The connection is not yet established.
     ///
-    /// # Errors
+    /// # Example
     ///
-    /// Returns an error if the connection or DNS resolution fails.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
+    /// ```
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main() -> Result<()> {
     /// use mc_ping::connection::Connection;
-    /// let addr = ("localhost".to_string(), 25565);
-    /// let conn = Connection::connect(addr).await?;
+    ///
+    /// let mut conn = Connection::new(("play.example.com".to_string(), 25565)).await;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn connect(addr: (String, u16)) -> Result<Self> {
+    pub fn new(addr: (String, u16)) -> Self {
+        Self {
+            stream: None,
+            timeout: None,
+            is_initialized: true,
+            proxy_addr: None,
+            addr,
+        }
+    }
+
+    /// Establishes a connection to the Minecraft server.
+    ///
+    /// If a SOCKS5 proxy is set via `proxy_socks5()`, the connection will be
+    /// established through that proxy. Otherwise, it connects directly.
+    ///
+    /// DNS resolution depends on the "resolve" feature flag:
+    /// - Without "resolve" feature: domain names are not supported (must be IP).
+    /// - With "resolve" feature enabled: domain names are resolved asynchronously.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if connection, proxy connection, or DNS resolution fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use anyhow::Result;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<()> {
+    /// use mc_ping::connection::Connection;
+    ///
+    /// let mut conn = Connection::new(("example.com".to_string(), 25565)).await;
+    /// conn = conn.connect().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn connect(&mut self) -> Result<Self> {
         #[cfg(not(feature = "resolve"))]
         {
+            let _timeout = self.timeout.unwrap_or(8000);
+
+            let addr = self.addr.clone();
             if is_domain(&addr.0) {
-                return Err(anyhow!(r#"Enable feature "resolve" to enable domain resolving"#))
+                return Err(anyhow!(r#"Enable feature "resolve" to enable domain resolving"#));
             }
-            let stream = TcpStream::connect(addr.clone()).await?;
-            Ok(Self {
-                stream,
-                addr,
-            })
+
+            match &self.proxy_addr {
+                None => {
+                    // Direct TCP connection with timeout
+                    let stream = timeout(Duration::from_millis(_timeout), TcpStream::connect(addr.clone())).await??;
+                    Ok(Self {
+                        stream: Some(stream),
+                        is_initialized: true,
+                        timeout: self.timeout.clone(),
+                        proxy_addr: self.proxy_addr.clone(),
+                        addr: self.addr.clone(),
+                    })
+                }
+                Some(proxy_addr) => {
+                    // Connect via SOCKS5 proxy with timeout
+                    let stream = timeout(
+                        Duration::from_millis(_timeout),
+                        Socks5Stream::connect(
+                            (proxy_addr.0.as_str(), proxy_addr.1),
+                            (addr.0.as_str(), addr.1)
+                        )
+                    ).await??;
+                    // Convert Socks5Stream into underlying TcpStream
+                    Ok(Self {
+                        stream: Some(stream.into_inner()),
+                        is_initialized: true,
+                        timeout: self.timeout.clone(),
+                        proxy_addr: self.proxy_addr.clone(),
+                        addr: self.addr.clone(),
+                    })
+                }
+            }
         }
         #[cfg(feature = "resolve")]
         {
-            let host_port = format!("{}:{}", addr.0.clone(), addr.1);
+            let _timeout = self.timeout.unwrap_or(8000);
+            let host_port = format!("{}:{}", self.addr.0.clone(), self.addr.1);
             let mut addrs = lookup_host(host_port.clone()).await?;
             if let Some(sock_addr) = addrs.next() {
-                let stream = TcpStream::connect(sock_addr).await?;
+                // Connect to resolved socket address with timeout
+                let stream = timeout(Duration::from_millis(_timeout), TcpStream::connect(sock_addr)).await??;
                 Ok(Self {
-                    stream,
-                    addr: (addr.0, sock_addr.port()),
+                    stream: Some(stream),
+                    is_initialized: true,
+                    timeout: self.timeout.clone(),
+                    proxy_addr: self.proxy_addr.clone(),
+                    addr: self.addr.clone(),
                 })
             } else {
-                Err(anyhow::anyhow!("Could not resolve address: {}", host_port))
+                Err(anyhow!("Could not resolve address: {}", host_port))
             }
         }
     }
 
-    /// Connects to a Minecraft server with a timeout.
-    ///
-    /// Attempts to connect and returns an error if the timeout elapses.
+    /// Sets the timeout for connection and I/O operations (milliseconds).
     ///
     /// # Errors
     ///
-    /// Returns an error if the connection fails or times out.
+    /// Returns error if called before initialization.
     ///
-    /// # Examples
+    /// # Example
     ///
-    /// ```no_run
-    /// # use std::time::Duration;
+    /// ```
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main() -> Result<()> {
     /// use mc_ping::connection::Connection;
-    /// let addr = ("example.com".to_string(), 25565);
-    /// match Connection::connect_timeout(addr, Duration::from_secs(5)).await {
-    ///     Ok(conn) => println!("Connected!"),
-    ///     Err(e) => println!("Failed to connect: {}", e),
-    /// }
+    ///
+    /// let mut conn = Connection::new(("127.0.0.1".to_string(), 25565)).await;
+    /// conn.timeout(5000).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn connect_timeout(addr: (String, u16), _timeout: Duration) -> Result<Self> {
-        let _conn = timeout(_timeout, Self::connect(addr)).await;
-        match _conn {
-            Ok(Ok(conn)) => Ok(conn),
-            Err(err) => Err(anyhow::anyhow!("Could not connect: {} (timeout)", err))?,
-            Ok(Err(err)) => Err(anyhow::anyhow!("Could not connect: {}", err))?,
+    pub fn timeout(mut self, timeout: u64) -> Result<Self> {
+        if !self.is_initialized {
+            return Err(anyhow!("using: Connection::new((addr, port)).timeout(u64)"));
         }
-    }
 
-    /// Sends the Minecraft handshake packet.
-    ///
-    /// This prepares the connection for further communication such as status query or login.
+        self.timeout = Some(timeout);
+        Ok(self)
+    }
+    /// Sets the SOCKS5 proxy address to use for connections.
     ///
     /// # Errors
     ///
-    /// Returns an error if writing to the TCP stream fails.
+    /// Returns error if called before initialization.
     ///
-    /// # Examples
+    /// # Example
     ///
-    /// ```no_run
+    /// ```
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main() -> Result<()> {
     /// use mc_ping::connection::Connection;
-    /// let addr = ("127.0.0.1".to_string(), 25565);
-    /// let mut conn = Connection::connect(addr).await?;
+    ///
+    /// let mut conn = Connection::new(("127.0.0.1".to_string(), 25565)).await;
+    /// conn.proxy_socks5(("127.0.0.1".to_string(), 1080)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn proxy_socks5(mut self, proxy_addr: (String, u16)) -> Result<Self> {
+        if !self.is_initialized {
+            return Err(anyhow!("using: Connection::new((ip, port)).proxy((ip, port))"));
+        }
+
+        self.proxy_addr = Some(proxy_addr);
+        Ok(self)
+    }
+
+    /// Sends the Minecraft handshake packet to the server.
+    ///
+    /// This prepares the connection for status query or login.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the stream is not connected or writing fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use anyhow::Result;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<()> {
+    /// use mc_ping::connection::Connection;
+    ///
+    /// let mut conn = Connection::new(("127.0.0.1".to_string(), 25565)).await;
+    /// conn = conn.connect().await?;
     /// conn.send_handshake().await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn send_handshake(&mut self) -> Result<()> {
-        let _ip = self.addr.0.clone();
-        let _port = self.addr.1;
-        let handshake = ClientHandshake::new(_ip, _port);
+        let stream = match &mut self.stream {
+            Some(s) => s,
+            None => return Err(anyhow!("TCPstream is None. Maybe you forgot to .connect() ?")),
+        };
+
+        let ip = self.addr.0.clone();
+        let port = self.addr.1;
+        let handshake = ClientHandshake::new(ip, port);
         let bytes = handshake.to_bytes();
-        self.stream.write_all(bytes.as_slice()).await?;
+
+        timeout(
+            Duration::from_millis(self.timeout.unwrap_or(9000)),
+            stream.write_all(bytes.as_slice())
+        ).await??;
+
         Ok(())
     }
 
-    /// Sends the status query packet.
-    ///
-    /// Internal helper function, generally not called directly.
-    async fn __send_query_packet(&mut self) -> Result<()> {
-        let query = StatusQuery::new();
-        let bytes = query.to_bytes();
-        self.stream.write_all(bytes.as_slice()).await?;
-        Ok(())
-    }
-
-    /// Reads and parses the server's status response packet.
-    ///
-    /// Internal helper function, generally not called directly.
-    async fn __read_status_packet(&mut self) -> Result<ServerQueryResponse> {
-        let mut buf = [0u8; 10_000];
-        self.stream.read(&mut buf).await?;
-        let status_packet = ServerQueryResponse::from(&buf[..]);
-        Ok(status_packet)
-    }
-
-    /// Queries the server status.
-    ///
-    /// Sends a status query and reads the response, returning a parsed ServerStatus.
-    /// Assumes handshake has been sent beforehand.
+    /// Internal helper to send the status query packet.
     ///
     /// # Errors
     ///
-    /// Returns an error if sending or receiving fails, or parsing fails.
+    /// Returns error if writing to stream fails or stream is not connected.
+    async fn __send_query_packet(&mut self) -> Result<()> {
+        let query = StatusQuery::new();
+        let bytes = query.to_bytes();
+
+        let stream = match &mut self.stream {
+            Some(s) => s,
+            None => return Err(anyhow!("TCPstream is None. Maybe you forgot to .connect()?")),
+        };
+
+        stream.write_all(bytes.as_slice()).await?;
+        Ok(())
+    }
+
+    /// Internal helper to read the status response packet.
     ///
-    /// # Examples
+    /// # Errors
     ///
-    /// ```no_run
+    /// Returns error if reading from stream fails or stream is not connected.
+    async fn __read_status_packet(&mut self) -> Result<ServerQueryResponse> {
+        let mut buf = [0u8; 10_000];
+
+        let stream = match &mut self.stream {
+            Some(s) => s,
+            None => return Err(anyhow!("TCPstream is None. Maybe you forgot to .connect()?")),
+        };
+
+        let n = stream.read(&mut buf).await?;
+        let status_packet = ServerQueryResponse::from(&buf[..n]).await;
+        Ok(status_packet)
+    }
+
+    /// Sends a status query and reads the server response.
+    ///
+    /// Assumes handshake has already been sent.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if sending or reading packets fails, or if parsing fails.
+    ///
+    /// # Example
+    ///
+    /// ```
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main() -> Result<()> {
     /// use mc_ping::connection::Connection;
-    /// let addr = ("localhost".to_string(), 25565);
-    /// let mut conn = Connection::connect(addr).await?;
+    ///
+    /// let mut conn = Connection::new(("localhost".to_string(), 25565)).await;
+    /// conn = conn.connect().await?;
     /// conn.send_handshake().await?;
     /// let status = conn.get_status().await?;
     /// println!("Status: {:?}", status);
@@ -199,23 +311,24 @@ impl Connection {
         Ok(_status.parse_status()?)
     }
 
-    /// Performs a full ping: sends handshake + status query and returns server status.
+    /// Performs a full ping: sends handshake, status query, and parses the response.
     ///
-    /// Convenient for a single-step status check.
+    /// Convenient for one-step status check.
     ///
     /// # Errors
     ///
-    /// Returns an error if any network or parsing step fails.
+    /// Returns error if any step (network or parsing) fails.
     ///
-    /// # Examples
+    /// # Example
     ///
-    /// ```no_run
+    /// ```
     /// # use anyhow::Result;
     /// # #[tokio::main]
     /// # async fn main() -> Result<()> {
     /// use mc_ping::connection::Connection;
-    /// let addr = ("play.example.com".to_string(), 25565);
-    /// let mut conn = Connection::connect(addr).await?;
+    ///
+    /// let mut conn = Connection::new(("play.example.com".to_string(), 25565)).await;
+    /// conn = conn.connect().await?;
     /// let status = conn.ping().await?;
     /// println!("Server status: {:?}", status);
     /// # Ok(())
