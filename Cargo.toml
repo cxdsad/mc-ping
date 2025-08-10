@@ -1,6 +1,6 @@
 [package]
 name = "mc-ping"
-version = "0.0.2"
+version = "0.0.20"
 edition = "2024"
 authors = ["cxdsad"]
 keywords = ["minecraft", "pinger", "mc", "non-blocking", "tcp"]
