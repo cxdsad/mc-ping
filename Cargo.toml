@@ -8,8 +8,7 @@ categories = ["asynchronous", "network-programming", "game-development"]
 description = "Simple Java Minecraft Server Pinger"
 repository = "https://github.com/cxdsad/mc-ping"
 readme = "README.md"
-license = "custom"
-
+license-file = "LICENSE.md"
 [features]
 resolve = []
 
